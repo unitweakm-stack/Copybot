@@ -84,6 +84,7 @@ async def ocr_bytes_async(image_bytes: bytes, filename: str) -> str:
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # Foydalanuvchi rasm yuborganda "Typing..." statusini ko'rsatadi
     await update.message.chat.send_action(action=ChatAction.TYPING)
 
     photo = update.message.photo[-1]
@@ -111,11 +112,19 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 def main() -> None:
     token = os.getenv("BOT_TOKEN", "").strip()
     if not token:
-        raise RuntimeError("BOT_TOKEN yo‘q. Env/Secrets ga BOT_TOKEN qo‘ying.")
+        raise RuntimeError("BOT_TOKEN topilmadi. Render Environment Variables bo'limiga qo'shing.")
 
+    # Application qurish
     app = Application.builder().token(token).build()
+    
+    # Rasm kelganda ishlov beruvchi handler
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+    print("Bot ishga tushdi...")
+    
+    # Render va boshqa serverlarda asyncio konflikt bermasligi uchun 
+    # run_polling() ni quyidagi parametr bilan ishlatamiz
+    app.run_polling(allowed_updates=Update.ALL_TYPES, close_loop=False)
 
 
 if __name__ == "__main__":
