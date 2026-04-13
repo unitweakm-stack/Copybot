@@ -13,21 +13,18 @@ from telegram.ext import Application, MessageHandler, ContextTypes, filters
 OCR_API_URL = "https://api.ocr.space/parse/image"
 DEFAULT_LANG = os.getenv("DEFAULT_LANG", "tur").strip().lower() or "tur"
 
-
 def clean_text(s: str) -> str:
     s = s.replace("\r\n", "\n").strip()
     s = re.sub(r"\n{3,}", "\n\n", s)
     return s.strip()
 
-
 def html_escape(s: str) -> str:
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
 
 def ocr_space_request(image_bytes: bytes, filename: str) -> str:
     api_key = os.getenv("OCR_SPACE_API_KEY", "").strip()
     if not api_key:
-        raise RuntimeError("OCR_SPACE_API_KEY yo‘q. Env/Secrets ga qo‘ying.")
+        raise RuntimeError("OCR_SPACE_API_KEY topilmadi.")
 
     boundary = "----WEAKOCRBOUNDARY7MA4YWxkTrZu0gW"
     fields = {
@@ -68,64 +65,51 @@ def ocr_space_request(image_bytes: bytes, filename: str) -> str:
 
     if payload.get("IsErroredOnProcessing"):
         msg = payload.get("ErrorMessage") or payload.get("ErrorDetails") or "OCR.Space xato"
-        if isinstance(msg, list):
-            msg = "; ".join(str(x) for x in msg)
         raise RuntimeError(str(msg))
 
     parsed = payload.get("ParsedResults") or []
-    if not parsed:
-        return ""
-
-    return (parsed[0].get("ParsedText") or "").strip()
-
-
-async def ocr_bytes_async(image_bytes: bytes, filename: str) -> str:
-    return await asyncio.to_thread(ocr_space_request, image_bytes, filename)
-
+    return (parsed[0].get("ParsedText") or "").strip() if parsed else ""
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # Foydalanuvchi rasm yuborganda "Typing..." statusini ko'rsatadi
     await update.message.chat.send_action(action=ChatAction.TYPING)
-
     photo = update.message.photo[-1]
     tg_file = await photo.get_file()
     content = await tg_file.download_as_bytearray()
 
     try:
-        text = clean_text(await ocr_bytes_async(bytes(content), "photo.jpg"))
+        text = clean_text(await asyncio.to_thread(ocr_space_request, bytes(content), "photo.jpg"))
     except Exception as e:
         await update.message.reply_text(f"OCR xato: {e}")
         return
 
     if not text:
-        await update.message.reply_text("Matn topilmadi. Rasm tiniqroq bo‘lsin.")
+        await update.message.reply_text("Matn topilmadi.")
         return
 
     safe = html_escape(text)
-
-    if len(safe) > 3800:
-        safe = safe[:3800] + "\n...(qisqartirildi)"
-
+    if len(safe) > 3800: safe = safe[:3800] + "\n...(qisqartirildi)"
     await update.message.reply_text(f"<pre>{safe}</pre>", parse_mode="HTML")
 
-
-def main() -> None:
+async def run_bot():
     token = os.getenv("BOT_TOKEN", "").strip()
     if not token:
-        raise RuntimeError("BOT_TOKEN topilmadi. Render Environment Variables bo'limiga qo'shing.")
+        raise RuntimeError("BOT_TOKEN topilmadi.")
 
-    # Application qurish
     app = Application.builder().token(token).build()
-    
-    # Rasm kelganda ishlov beruvchi handler
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-
-    print("Bot ishga tushdi...")
     
-    # Render va boshqa serverlarda asyncio konflikt bermasligi uchun 
-    # run_polling() ni quyidagi parametr bilan ishlatamiz
-    app.run_polling(allowed_updates=Update.ALL_TYPES, close_loop=False)
-
+    # Botni ishga tushirish (bu usul Render uchun eng to'g'risi)
+    async with app:
+        await app.initialize()
+        await app.start()
+        print("Bot ishga tushdi...")
+        await app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+        # Bot to'xtamaguncha kutib turish
+        while True:
+            await asyncio.sleep(3600)
 
 if __name__ == "__main__":
-    main()
+    try:
+        asyncio.run(run_bot())
+    except (KeyboardInterrupt, SystemExit):
+        pass
